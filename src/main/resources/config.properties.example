@@ -1,0 +1,44 @@
+# Configuration de l'application Company Job Searcher - EXEMPLE
+# Copiez ce fichier en config.properties et remplissez vos identifiants
+
+# ==============================================================================
+# API France Travail (ex-Pôle Emploi) - Offres d'emploi
+# ==============================================================================
+# Pour obtenir ces identifiants:
+# 1. Créer un compte sur https://francetravail.io/
+# 2. Créer une application dans "Mon espace" > "Tableau de bord"
+# 3. S'abonner à l'API "Offres d'emploi v2"
+# 4. Copier le Client ID et Client Secret
+
+francetravail.client.id=PAR_votre_client_id_ici
+francetravail.client.secret=votre_client_secret_ici
+francetravail.scope=api_offresdemploiv2 o2dsoffre
+francetravail.api.base.url=https://api.francetravail.io/partenaire
+francetravail.token.url=https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=/partenaire
+
+# ==============================================================================
+# API SIRENE (INSEE) - Données d'entreprises
+# ==============================================================================
+# Pour obtenir cette clé:
+# 1. S'inscrire sur https://api.insee.fr/catalogue/
+# 2. Créer une application
+# 3. S'abonner à l'API "Sirene données ouvertes"
+# 4. Copier la Consumer Key
+
+insee.api.key=votre_consumer_key_insee_ici
+insee.api.base.url=https://api.insee.fr/entreprises/sirene/V3.11
+
+# ==============================================================================
+# Paramètres de l'application (ne pas modifier)
+# ==============================================================================
+idf.departments=75,77,78,91,92,93,94,95
+naf.codes.it=62.01Z,62.02A,62.02B,62.03Z,62.09Z,63.11Z,63.12Z
+api.max.results.jobs=100
+api.max.results.companies=20
+http.timeout=10
+ui.window.width=1200
+ui.window.height=800
+ui.default.keywords=développeur java
+export.default.filename=resultats_entreprises.csv
+export.csv.encoding=UTF-8
+export.csv.separator=;
