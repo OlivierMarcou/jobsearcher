@@ -59,17 +59,20 @@ public class ConfigLoader {
         properties.setProperty("insee.api.base.url", "https://api.insee.fr/entreprises/sirene/V3.11");
         
         properties.setProperty("idf.departments", "75,77,78,91,92,93,94,95");
+        properties.setProperty("france.departments", "01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,21,22,23,24,25,26,27,28,29,2A,2B,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95");
+        properties.setProperty("dom.departments", "971,972,973,974,976");
         properties.setProperty("naf.codes.it", "62.01Z,62.02A,62.02B,62.03Z,62.09Z,63.11Z,63.12Z");
         
         properties.setProperty("api.max.results.jobs", "100");
         properties.setProperty("api.max.results.companies", "20");
         properties.setProperty("http.timeout", "10");
         
-        properties.setProperty("ui.window.width", "1200");
-        properties.setProperty("ui.window.height", "800");
+        properties.setProperty("ui.window.width", "1400");
+        properties.setProperty("ui.window.height", "900");
         properties.setProperty("ui.default.keywords", "développeur java");
         
-        properties.setProperty("export.default.filename", "resultats_entreprises.csv");
+        properties.setProperty("export.default.filename.csv", "resultats_entreprises.csv");
+        properties.setProperty("export.default.filename.json", "resultats_entreprises.json");
         properties.setProperty("export.csv.encoding", "UTF-8");
         properties.setProperty("export.csv.separator", ";");
     }
@@ -172,6 +175,31 @@ public class ConfigLoader {
     
     public String[] getIdfDepartments() {
         return getArrayProperty("idf.departments");
+    }
+    
+    public String[] getFranceDepartments() {
+        return getArrayProperty("france.departments");
+    }
+    
+    public String[] getDomDepartments() {
+        return getArrayProperty("dom.departments");
+    }
+    
+    public String[] getAllDepartments() {
+        String[] france = getFranceDepartments();
+        String[] dom = getDomDepartments();
+        String[] all = new String[france.length + dom.length];
+        System.arraycopy(france, 0, all, 0, france.length);
+        System.arraycopy(dom, 0, all, france.length, dom.length);
+        return all;
+    }
+    
+    public String[] getDefaultDepartments() {
+        String defaultDepts = getProperty("default.departments");
+        if (defaultDepts != null && !defaultDepts.isEmpty()) {
+            return defaultDepts.split(",");
+        }
+        return getFranceDepartments();
     }
     
     public String[] getNafCodesIT() {

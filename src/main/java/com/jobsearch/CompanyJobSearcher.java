@@ -12,6 +12,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import com.google.gson.*;
 
@@ -33,6 +35,7 @@ public class CompanyJobSearcher extends JFrame {
     private JTextField searchField;
     private JComboBox<String> departmentCombo;
     private JComboBox<String> searchTypeCombo;
+    private JComboBox<String> zoneCombo;
     private JButton searchButton;
     private JButton stopButton;
     private JTable resultTable;
@@ -47,6 +50,9 @@ public class CompanyJobSearcher extends JFrame {
     private final Gson gson;
     private volatile boolean searchInProgress = false;
     private String franceTravailAccessToken = null;
+    
+    // Stockage des offres complètes pour export
+    private final List<JobOffer> jobOffers = new ArrayList<>();
     
     public CompanyJobSearcher() {
         super("Recherche d'Entreprises IT - Île-de-France");
@@ -116,20 +122,31 @@ public class CompanyJobSearcher extends JFrame {
         });
         searchCriteriaPanel.add(searchTypeCombo, gbc);
         
-        // Département
+        // Zone géographique
         gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0;
+        searchCriteriaPanel.add(new JLabel("Zone:"), gbc);
+        
+        gbc.gridx = 1; gbc.weightx = 1;
+        zoneCombo = new JComboBox<>(new String[]{
+            "Île-de-France uniquement",
+            "France métropolitaine",
+            "Toute la France (DOM-TOM inclus)",
+            "Département spécifique"
+        });
+        zoneCombo.addActionListener(e -> updateDepartmentCombo());
+        searchCriteriaPanel.add(zoneCombo, gbc);
+        
+        // Département
+        gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0;
         searchCriteriaPanel.add(new JLabel("Département:"), gbc);
         
         gbc.gridx = 1; gbc.weightx = 1;
-        String[] idfDepartments = config.getIdfDepartments();
-        String[] deptOptions = new String[idfDepartments.length + 1];
-        deptOptions[0] = "Tous (Île-de-France)";
-        System.arraycopy(idfDepartments, 0, deptOptions, 1, idfDepartments.length);
-        departmentCombo = new JComboBox<>(deptOptions);
+        departmentCombo = new JComboBox<>();
+        updateDepartmentCombo(); // Initialiser avec les départements IDF
         searchCriteriaPanel.add(departmentCombo, gbc);
         
         // Mots-clés
-        gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0;
+        gbc.gridx = 0; gbc.gridy = 3; gbc.weightx = 0;
         searchCriteriaPanel.add(new JLabel("Mots-clés:"), gbc);
         
         gbc.gridx = 1; gbc.weightx = 1;
@@ -138,7 +155,7 @@ public class CompanyJobSearcher extends JFrame {
         searchCriteriaPanel.add(searchField, gbc);
         
         // Boutons
-        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2;
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2;
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         
         searchButton = new JButton("🔍 Rechercher");
@@ -159,6 +176,24 @@ public class CompanyJobSearcher extends JFrame {
         panel.add(searchCriteriaPanel, BorderLayout.CENTER);
         
         return panel;
+    }
+    
+    private void updateDepartmentCombo() {
+        String selectedZone = (String) zoneCombo.getSelectedItem();
+        departmentCombo.removeAllItems();
+        
+        if (selectedZone.equals("Département spécifique")) {
+            // Montrer tous les départements français
+            departmentCombo.setEnabled(true);
+            String[] allDepts = config.getAllDepartments();
+            for (String dept : allDepts) {
+                departmentCombo.addItem(dept);
+            }
+        } else {
+            // Désactiver la sélection, on utilisera tous les départements de la zone
+            departmentCombo.setEnabled(false);
+            departmentCombo.addItem("(Tous de la zone sélectionnée)");
+        }
     }
     
     private JPanel createApiConfigPanel() {
@@ -194,8 +229,8 @@ public class CompanyJobSearcher extends JFrame {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder("Résultats"));
         
-        // Modèle de table
-        String[] columns = {"Entreprise", "SIRET", "Secteur", "Département", "Ville", "Type", "Détails"};
+        // Modèle de table avec plus de colonnes
+        String[] columns = {"Entreprise", "Poste", "📧 Email", "Dép.", "Ville", "Contrat", "🔗 Offre", "🌐 Site"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -210,25 +245,34 @@ public class CompanyJobSearcher extends JFrame {
         resultTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 12));
         
         // Ajuster les largeurs de colonnes
-        resultTable.getColumnModel().getColumn(0).setPreferredWidth(200);
-        resultTable.getColumnModel().getColumn(1).setPreferredWidth(120);
-        resultTable.getColumnModel().getColumn(2).setPreferredWidth(150);
-        resultTable.getColumnModel().getColumn(3).setPreferredWidth(80);
-        resultTable.getColumnModel().getColumn(4).setPreferredWidth(120);
-        resultTable.getColumnModel().getColumn(5).setPreferredWidth(100);
-        resultTable.getColumnModel().getColumn(6).setPreferredWidth(250);
+        resultTable.getColumnModel().getColumn(0).setPreferredWidth(200); // Entreprise
+        resultTable.getColumnModel().getColumn(1).setPreferredWidth(250); // Poste
+        resultTable.getColumnModel().getColumn(2).setPreferredWidth(200); // Email
+        resultTable.getColumnModel().getColumn(3).setPreferredWidth(50);  // Dép.
+        resultTable.getColumnModel().getColumn(4).setPreferredWidth(120); // Ville
+        resultTable.getColumnModel().getColumn(5).setPreferredWidth(100); // Contrat
+        resultTable.getColumnModel().getColumn(6).setPreferredWidth(150); // Lien offre
+        resultTable.getColumnModel().getColumn(7).setPreferredWidth(150); // Site
         
         JScrollPane scrollPane = new JScrollPane(resultTable);
         panel.add(scrollPane, BorderLayout.CENTER);
         
         // Panel d'actions sur les résultats
         JPanel actionsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        JButton exportButton = new JButton("📊 Exporter CSV");
-        exportButton.addActionListener(e -> exportToCSV());
-        JButton clearButton = new JButton("🗑 Effacer");
-        clearButton.addActionListener(e -> tableModel.setRowCount(0));
+        JButton exportCsvButton = new JButton("📊 Exporter CSV");
+        exportCsvButton.addActionListener(e -> exportToCSV());
         
-        actionsPanel.add(exportButton);
+        JButton exportJsonButton = new JButton("📄 Exporter JSON");
+        exportJsonButton.addActionListener(e -> exportToJSON());
+        
+        JButton clearButton = new JButton("🗑 Effacer");
+        clearButton.addActionListener(e -> {
+            tableModel.setRowCount(0);
+            jobOffers.clear();
+        });
+        
+        actionsPanel.add(exportCsvButton);
+        actionsPanel.add(exportJsonButton);
         actionsPanel.add(clearButton);
         actionsPanel.add(new JLabel("Total: "));
         
@@ -344,23 +388,23 @@ public class CompanyJobSearcher extends JFrame {
         searchButton.setEnabled(false);
         stopButton.setEnabled(true);
         
-        // Sauvegarder le nombre de lignes avant d'effacer (pour comparaison)
-        final int initialRowCount = tableModel.getRowCount();
-        tableModel.setRowCount(0); // Effacer les résultats précédents
+        // Effacer les résultats précédents
+        tableModel.setRowCount(0);
+        jobOffers.clear(); // Effacer les offres stockées
         progressBar.setValue(0);
         
         String searchType = (String) searchTypeCombo.getSelectedItem();
         String keywords = searchField.getText().trim();
-        String department = getDepartmentCode();
+        String[] departments = getDepartmentsForSearch(); // Utiliser la nouvelle méthode
         
         CompletableFuture.runAsync(() -> {
             try {
                 if (searchType.equals("Offres d'emploi IT") || searchType.equals("Recherche combinée")) {
-                    searchJobOffers(keywords, department);
+                    searchJobOffers(keywords, departments);
                 }
                 
                 if (searchType.equals("Entreprises secteur informatique") || searchType.equals("Recherche combinée")) {
-                    searchITCompanies(department);
+                    searchITCompanies(departments);
                 }
                 
                 // Calculer le nombre de résultats trouvés
@@ -398,37 +442,39 @@ public class CompanyJobSearcher extends JFrame {
         updateStatus("Recherche interrompue");
     }
     
-    private String getDepartmentCode() {
-        int index = departmentCombo.getSelectedIndex();
-        if (index == 0) return null; // Tous départements
-        String[] idfDepartments = config.getIdfDepartments();
-        return idfDepartments[index - 1];
+    private String[] getDepartmentsForSearch() {
+        String selectedZone = (String) zoneCombo.getSelectedItem();
+        
+        if (selectedZone.equals("Département spécifique")) {
+            // Un seul département sélectionné
+            String dept = (String) departmentCombo.getSelectedItem();
+            return new String[]{dept};
+        } else if (selectedZone.equals("Île-de-France uniquement")) {
+            return config.getIdfDepartments();
+        } else if (selectedZone.equals("France métropolitaine")) {
+            return config.getFranceDepartments();
+        } else { // "Toute la France (DOM-TOM inclus)"
+            return config.getAllDepartments();
+        }
     }
     
-    private void searchJobOffers(String keywords, String department) throws Exception {
+    private void searchJobOffers(String keywords, String[] allDepartments) throws Exception {
         updateStatus("Recherche d'offres d'emploi IT...");
         
-        // Si pas de département spécifique, on doit diviser l'IDF en plusieurs requêtes
-        // car l'API limite à 5 départements maximum
-        if (department == null) {
-            String[] idfDepartments = config.getIdfDepartments();
-            System.out.println("🔍 Recherche dans tous les départements IDF (limite API: 5 départements/requête)");
+        System.out.println("🔍 Recherche dans " + allDepartments.length + " départements (limite API: 5 départements/requête)");
+        
+        // Diviser en groupes de 5 départements max
+        for (int i = 0; i < allDepartments.length; i += 5) {
+            if (!searchInProgress) break;
             
-            // Diviser en groupes de 5 départements max
-            for (int i = 0; i < idfDepartments.length; i += 5) {
-                if (!searchInProgress) break;
-                
-                int end = Math.min(i + 5, idfDepartments.length);
-                String[] deptGroup = new String[end - i];
-                System.arraycopy(idfDepartments, i, deptGroup, 0, end - i);
-                
-                String deptList = String.join(",", deptGroup);
-                System.out.println("  → Groupe " + ((i / 5) + 1) + ": Départements " + deptList);
-                
-                searchJobOffersForDepartments(keywords, deptList);
-            }
-        } else {
-            searchJobOffersForDepartments(keywords, department);
+            int end = Math.min(i + 5, allDepartments.length);
+            String[] deptGroup = new String[end - i];
+            System.arraycopy(allDepartments, i, deptGroup, 0, end - i);
+            
+            String deptList = String.join(",", deptGroup);
+            System.out.println("  → Groupe " + ((i / 5) + 1) + ": Départements " + deptList);
+            
+            searchJobOffersForDepartments(keywords, deptList);
         }
     }
     
@@ -534,51 +580,182 @@ public class CompanyJobSearcher extends JFrame {
         }
     }
     
-    private void addJobOfferToTable(JsonObject offer) {
+    private void addJobOfferToTable(JsonObject offerJson) {
         try {
-            System.out.println("📝 Parsing offre: " + offer.keySet());
+            JobOffer offer = new JobOffer();
             
-            String company = offer.has("entreprise") && 
-                           offer.getAsJsonObject("entreprise").has("nom") ?
-                           offer.getAsJsonObject("entreprise").get("nom").getAsString() : "N/A";
-            
-            String title = offer.has("intitule") ? 
-                         offer.get("intitule").getAsString() : "N/A";
-            
-            System.out.println("  → Entreprise: " + company + ", Poste: " + title);
-            
-            String location = "N/A";
-            if (offer.has("lieuTravail")) {
-                JsonObject lieu = offer.getAsJsonObject("lieuTravail");
-                location = (lieu.has("libelle") ? lieu.get("libelle").getAsString() : "");
+            // ID
+            if (offerJson.has("id")) {
+                offer.setId(offerJson.get("id").getAsString());
             }
             
-            String dept = "N/A";
-            String city = "N/A";
-            if (location.contains(" - ")) {
-                String[] parts = location.split(" - ");
-                if (parts.length >= 2) {
-                    city = parts[0];
-                    dept = parts[1].replaceAll("[^0-9]", "");
+            // Intitulé
+            if (offerJson.has("intitule")) {
+                offer.setIntitule(offerJson.get("intitule").getAsString());
+            }
+            
+            // Description
+            if (offerJson.has("description")) {
+                offer.setDescription(offerJson.get("description").getAsString());
+            }
+            
+            // Dates
+            if (offerJson.has("dateCreation")) {
+                offer.setDateCreation(offerJson.get("dateCreation").getAsString());
+            }
+            if (offerJson.has("dateActualisation")) {
+                offer.setDateActualisation(offerJson.get("dateActualisation").getAsString());
+            }
+            
+            // Entreprise
+            if (offerJson.has("entreprise")) {
+                JsonObject entreprise = offerJson.getAsJsonObject("entreprise");
+                if (entreprise.has("nom")) {
+                    offer.setEntrepriseNom(entreprise.get("nom").getAsString());
+                }
+                if (entreprise.has("description")) {
+                    offer.setEntrepriseDescription(entreprise.get("description").getAsString());
+                }
+                if (entreprise.has("url")) {
+                    offer.setEntrepriseUrl(entreprise.get("url").getAsString());
+                }
+                if (entreprise.has("logo")) {
+                    offer.setEntrepriseLogoUrl(entreprise.get("logo").getAsString());
                 }
             }
             
-            String contract = offer.has("typeContrat") ? 
-                            offer.get("typeContrat").getAsString() : "N/A";
+            // CONTACT RECRUTEUR (PRIORITÉ !) 
+            if (offerJson.has("contact")) {
+                JsonObject contact = offerJson.getAsJsonObject("contact");
+                if (contact.has("courriel")) {
+                    offer.setContactEmail(contact.get("courriel").getAsString());
+                }
+                if (contact.has("nom")) {
+                    offer.setContactNom(contact.get("nom").getAsString());
+                }
+                if (contact.has("telephone")) {
+                    offer.setContactTelephone(contact.get("telephone").getAsString());
+                }
+                if (contact.has("urlPostulation")) {
+                    offer.setContactUrl(contact.get("urlPostulation").getAsString());
+                }
+            }
             
-            String details = String.format("Offre: %s | Contrat: %s", title, contract);
+            // Lieu de travail
+            if (offerJson.has("lieuTravail")) {
+                JsonObject lieu = offerJson.getAsJsonObject("lieuTravail");
+                if (lieu.has("libelle")) {
+                    offer.setLieuTravail(lieu.get("libelle").getAsString());
+                    
+                    // Parser ville et département
+                    String libelle = lieu.get("libelle").getAsString();
+                    if (libelle.contains(" - ")) {
+                        String[] parts = libelle.split(" - ");
+                        if (parts.length >= 1) offer.setVille(parts[0]);
+                        if (parts.length >= 2) {
+                            String deptStr = parts[1].replaceAll("[^0-9AB]", "");
+                            offer.setDepartement(deptStr);
+                        }
+                    }
+                }
+                if (lieu.has("codePostal")) {
+                    offer.setCodePostal(lieu.get("codePostal").getAsString());
+                }
+                if (lieu.has("commune")) {
+                    offer.setVille(lieu.get("commune").getAsString());
+                }
+                if (lieu.has("latitude")) {
+                    offer.setLatitude(lieu.get("latitude").getAsDouble());
+                }
+                if (lieu.has("longitude")) {
+                    offer.setLongitude(lieu.get("longitude").getAsDouble());
+                }
+            }
             
-            // Créer des variables final pour utilisation dans la lambda
-            final String finalCompany = company;
-            final String finalDept = dept;
-            final String finalCity = city;
-            final String finalDetails = details;
+            // Type de contrat
+            if (offerJson.has("typeContrat")) {
+                offer.setTypeContrat(offerJson.get("typeContrat").getAsString());
+            }
+            if (offerJson.has("typeContratLibelle")) {
+                offer.setTypeContratLibelle(offerJson.get("typeContratLibelle").getAsString());
+            }
             
-            System.out.println("  → Ajout à la table: " + finalCompany + " - " + finalCity);
+            // Nature contrat
+            if (offerJson.has("natureContrat")) {
+                offer.setNatureContrat(offerJson.get("natureContrat").getAsString());
+            }
             
+            // Expérience
+            if (offerJson.has("experienceLibelle")) {
+                offer.setExperienceLibelle(offerJson.get("experienceLibelle").getAsString());
+            }
+            if (offerJson.has("experienceExige")) {
+                offer.setExperienceExige(offerJson.get("experienceExige").getAsString());
+            }
+            
+            // Salaire
+            if (offerJson.has("salaire")) {
+                JsonObject salaire = offerJson.getAsJsonObject("salaire");
+                if (salaire.has("libelle")) {
+                    offer.setSalaire(salaire.get("libelle").getAsString());
+                }
+            }
+            
+            // Durée de travail
+            if (offerJson.has("dureeTravailLibelle")) {
+                offer.setDureeTravailLibelle(offerJson.get("dureeTravailLibelle").getAsString());
+            }
+            
+            // Compétences
+            if (offerJson.has("competences")) {
+                JsonArray competences = offerJson.getAsJsonArray("competences");
+                StringBuilder compStr = new StringBuilder();
+                for (int i = 0; i < competences.size(); i++) {
+                    JsonObject comp = competences.get(i).getAsJsonObject();
+                    if (comp.has("libelle")) {
+                        if (i > 0) compStr.append(", ");
+                        compStr.append(comp.get("libelle").getAsString());
+                    }
+                }
+                offer.setCompetences(compStr.toString());
+            }
+            
+            // URLs
+            if (offerJson.has("origineOffre")) {
+                JsonObject origine = offerJson.getAsJsonObject("origineOffre");
+                if (origine.has("urlOrigine")) {
+                    offer.setUrlOrigine(origine.get("urlOrigine").getAsString());
+                }
+                if (origine.has("partenaires")) {
+                    JsonArray partenaires = origine.getAsJsonArray("partenaires");
+                    if (partenaires.size() > 0) {
+                        JsonObject partenaire = partenaires.get(0).getAsJsonObject();
+                        if (partenaire.has("url")) {
+                            offer.setUrlPostulation(partenaire.get("url").getAsString());
+                        }
+                    }
+                }
+            }
+            
+            // Stocker l'offre complète
+            jobOffers.add(offer);
+            
+            // Préparer les données pour le tableau
+            final String entreprise = offer.getEntrepriseNom() != null ? offer.getEntrepriseNom() : "N/A";
+            final String poste = offer.getIntitule() != null ? offer.getIntitule() : "N/A";
+            final String email = offer.getContactEmail() != null ? offer.getContactEmail() : "N/A";
+            final String dept = offer.getDepartement() != null ? offer.getDepartement() : "N/A";
+            final String ville = offer.getVille() != null ? offer.getVille() : "N/A";
+            final String contrat = offer.getTypeContratLibelle() != null ? offer.getTypeContratLibelle() : "N/A";
+            final String urlOffre = offer.getUrlOrigine() != null ? offer.getUrlOrigine() : "N/A";
+            final String urlSite = offer.getEntrepriseUrl() != null ? offer.getEntrepriseUrl() : "N/A";
+            
+            System.out.println("  → " + entreprise + " | " + poste + " | 📧 " + email);
+            
+            // Ajouter au tableau
             SwingUtilities.invokeLater(() -> 
                 tableModel.addRow(new Object[]{
-                    finalCompany, "N/A", "Offre IT", finalDept, finalCity, "Offre d'emploi", finalDetails
+                    entreprise, poste, email, dept, ville, contrat, urlOffre, urlSite
                 }));
                 
         } catch (Exception e) {
@@ -587,7 +764,7 @@ public class CompanyJobSearcher extends JFrame {
         }
     }
     
-    private void searchITCompanies(String department) throws Exception {
+    private void searchITCompanies(String[] departments) throws Exception {
         updateStatus("Recherche d'entreprises du secteur informatique...");
         
         // Codes NAF pour le secteur informatique depuis la config
@@ -596,11 +773,11 @@ public class CompanyJobSearcher extends JFrame {
         for (String nafCode : itNafCodes) {
             if (!searchInProgress) break;
             
-            searchCompaniesByNAF(nafCode, department);
+            searchCompaniesByNAF(nafCode, departments);
         }
     }
     
-    private void searchCompaniesByNAF(String nafCode, String department) throws Exception {
+    private void searchCompaniesByNAF(String nafCode, String[] departments) throws Exception {
         updateStatus(String.format("Recherche entreprises NAF %s...", nafCode));
         
         StringBuilder urlBuilder = new StringBuilder(config.getInseeApiBaseUrl());
@@ -609,15 +786,14 @@ public class CompanyJobSearcher extends JFrame {
         // Filtres
         urlBuilder.append("activitePrincipaleUniteLegale:").append(nafCode);
         
-        if (department != null) {
-            urlBuilder.append(" AND codeCommuneEtablissement:").append(department).append("*");
+        // Recherche dans plusieurs départements
+        if (departments.length == 1) {
+            urlBuilder.append(" AND codeCommuneEtablissement:").append(departments[0]).append("*");
         } else {
-            // Tous les départements IDF
-            String[] idfDepartments = config.getIdfDepartments();
             urlBuilder.append(" AND (");
-            for (int i = 0; i < idfDepartments.length; i++) {
+            for (int i = 0; i < departments.length && i < 10; i++) { // Limite à 10 départements par requête
                 if (i > 0) urlBuilder.append(" OR ");
-                urlBuilder.append("codeCommuneEtablissement:").append(idfDepartments[i]).append("*");
+                urlBuilder.append("codeCommuneEtablissement:").append(departments[i]).append("*");
             }
             urlBuilder.append(")");
         }
@@ -724,41 +900,137 @@ public class CompanyJobSearcher extends JFrame {
     }
     
     private void exportToCSV() {
+        if (jobOffers.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                "Aucune offre à exporter. Lancez d'abord une recherche.",
+                "Information", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Exporter en CSV");
-        fileChooser.setSelectedFile(new java.io.File(config.getExportDefaultFilename()));
+        fileChooser.setSelectedFile(new java.io.File("resultats_entreprises.csv"));
         
         if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
             try (java.io.PrintWriter writer = new java.io.PrintWriter(
                     fileChooser.getSelectedFile(), 
-                    java.nio.charset.Charset.forName(config.getExportEncoding()))) {
+                    java.nio.charset.Charset.forName("UTF-8"))) {
                 
-                String separator = config.getExportSeparator();
+                String sep = ";";
                 
-                // En-têtes
-                for (int i = 0; i < tableModel.getColumnCount(); i++) {
-                    if (i > 0) writer.print(separator);
-                    writer.print(tableModel.getColumnName(i));
-                }
-                writer.println();
+                // En-têtes détaillés
+                writer.println(String.join(sep,
+                    "ID Offre",
+                    "Intitulé",
+                    "Description",
+                    "Date Création",
+                    "Date MAJ",
+                    "Entreprise Nom",
+                    "Entreprise Description",
+                    "Entreprise URL",
+                    "📧 Contact Email",
+                    "Contact Nom",
+                    "Contact Téléphone",
+                    "Contact URL",
+                    "Ville",
+                    "Code Postal",
+                    "Département",
+                    "Région",
+                    "Latitude",
+                    "Longitude",
+                    "Type Contrat",
+                    "Nature Contrat",
+                    "Expérience",
+                    "Salaire",
+                    "Durée Travail",
+                    "Compétences",
+                    "🔗 URL Offre",
+                    "🔗 URL Postulation",
+                    "Source"
+                ));
                 
                 // Données
-                for (int row = 0; row < tableModel.getRowCount(); row++) {
-                    for (int col = 0; col < tableModel.getColumnCount(); col++) {
-                        if (col > 0) writer.print(separator);
-                        Object value = tableModel.getValueAt(row, col);
-                        writer.print(value != null ? value.toString().replace(separator, ",") : "");
-                    }
-                    writer.println();
+                for (JobOffer offer : jobOffers) {
+                    writer.println(String.join(sep,
+                        csvEscape(offer.getId()),
+                        csvEscape(offer.getIntitule()),
+                        csvEscape(offer.getDescription()),
+                        csvEscape(offer.getDateCreation()),
+                        csvEscape(offer.getDateActualisation()),
+                        csvEscape(offer.getEntrepriseNom()),
+                        csvEscape(offer.getEntrepriseDescription()),
+                        csvEscape(offer.getEntrepriseUrl()),
+                        csvEscape(offer.getContactEmail()),
+                        csvEscape(offer.getContactNom()),
+                        csvEscape(offer.getContactTelephone()),
+                        csvEscape(offer.getContactUrl()),
+                        csvEscape(offer.getVille()),
+                        csvEscape(offer.getCodePostal()),
+                        csvEscape(offer.getDepartement()),
+                        csvEscape(offer.getRegion()),
+                        offer.getLatitude() != null ? offer.getLatitude().toString() : "",
+                        offer.getLongitude() != null ? offer.getLongitude().toString() : "",
+                        csvEscape(offer.getTypeContratLibelle()),
+                        csvEscape(offer.getNatureContrat()),
+                        csvEscape(offer.getExperienceLibelle()),
+                        csvEscape(offer.getSalaire()),
+                        csvEscape(offer.getDureeTravailLibelle()),
+                        csvEscape(offer.getCompetences()),
+                        csvEscape(offer.getUrlOrigine()),
+                        csvEscape(offer.getUrlPostulation()),
+                        csvEscape(offer.getSource())
+                    ));
                 }
                 
                 JOptionPane.showMessageDialog(this,
-                    "Export réussi: " + fileChooser.getSelectedFile().getName(),
+                    "Export réussi: " + jobOffers.size() + " offres exportées\n" +
+                    "Fichier: " + fileChooser.getSelectedFile().getName(),
                     "Succès", JOptionPane.INFORMATION_MESSAGE);
                     
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(this,
-                    "Erreur lors de l'export: " + e.getMessage(),
+                    "Erreur lors de l'export CSV:\n" + e.getMessage(),
+                    "Erreur", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    
+    private String csvEscape(String value) {
+        if (value == null) return "";
+        // Échapper les guillemets et entourer de guillemets si nécessaire
+        if (value.contains(";") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
+    }
+    
+    private void exportToJSON() {
+        if (jobOffers.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                "Aucune offre à exporter. Lancez d'abord une recherche.",
+                "Information", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Exporter en JSON");
+        fileChooser.setSelectedFile(new java.io.File("resultats_entreprises.json"));
+        
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try (java.io.FileWriter writer = new java.io.FileWriter(fileChooser.getSelectedFile())) {
+                
+                Gson gsonPretty = new GsonBuilder().setPrettyPrinting().create();
+                String json = gsonPretty.toJson(jobOffers);
+                writer.write(json);
+                
+                JOptionPane.showMessageDialog(this,
+                    "Export réussi: " + jobOffers.size() + " offres exportées\n" +
+                    "Fichier: " + fileChooser.getSelectedFile().getName(),
+                    "Succès", JOptionPane.INFORMATION_MESSAGE);
+                    
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this,
+                    "Erreur lors de l'export JSON:\n" + e.getMessage(),
                     "Erreur", JOptionPane.ERROR_MESSAGE);
             }
         }
