@@ -35,7 +35,7 @@ public class CompanyJobSearcher extends JFrame {
     private JTextField searchField;
     private JComboBox<String> departmentCombo;
     private JComboBox<String> searchTypeCombo;
-    private JComboBox<String> zoneCombo;
+    private JComboBox<String> regionCombo;
     private JButton searchButton;
     private JButton stopButton;
     private JTable resultTable;
@@ -122,19 +122,21 @@ public class CompanyJobSearcher extends JFrame {
         });
         searchCriteriaPanel.add(searchTypeCombo, gbc);
         
-        // Zone géographique
+        // Région
         gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0;
-        searchCriteriaPanel.add(new JLabel("Zone:"), gbc);
+        searchCriteriaPanel.add(new JLabel("Région:"), gbc);
         
         gbc.gridx = 1; gbc.weightx = 1;
-        zoneCombo = new JComboBox<>(new String[]{
-            "Île-de-France uniquement",
-            "France métropolitaine",
-            "Toute la France (DOM-TOM inclus)",
-            "Département spécifique"
-        });
-        zoneCombo.addActionListener(e -> updateDepartmentCombo());
-        searchCriteriaPanel.add(zoneCombo, gbc);
+        String[] regionOptions = new String[RegionMapper.getAllRegions().length + 3];
+        regionOptions[0] = "France métropolitaine (toutes régions)";
+        regionOptions[1] = "France entière (DOM-TOM inclus)";
+        regionOptions[2] = "Département spécifique";
+        String[] allRegions = RegionMapper.getAllRegions();
+        System.arraycopy(allRegions, 0, regionOptions, 3, allRegions.length);
+        
+        regionCombo = new JComboBox<>(regionOptions);
+        regionCombo.addActionListener(e -> updateDepartmentCombo());
+        searchCriteriaPanel.add(regionCombo, gbc);
         
         // Département
         gbc.gridx = 0; gbc.gridy = 2; gbc.weightx = 0;
@@ -142,7 +144,8 @@ public class CompanyJobSearcher extends JFrame {
         
         gbc.gridx = 1; gbc.weightx = 1;
         departmentCombo = new JComboBox<>();
-        updateDepartmentCombo(); // Initialiser avec les départements IDF
+        departmentCombo.setEnabled(false); // Désactivé par défaut
+        updateDepartmentCombo(); // Initialiser
         searchCriteriaPanel.add(departmentCombo, gbc);
         
         // Mots-clés
@@ -179,20 +182,20 @@ public class CompanyJobSearcher extends JFrame {
     }
     
     private void updateDepartmentCombo() {
-        String selectedZone = (String) zoneCombo.getSelectedItem();
-        departmentCombo.removeAllItems();
+        String selectedRegion = (String) regionCombo.getSelectedItem();
+        departmentCombo.removeAllItems(); // IMPORTANT : Toujours nettoyer d'abord
         
-        if (selectedZone.equals("Département spécifique")) {
+        if (selectedRegion.equals("Département spécifique")) {
             // Montrer tous les départements français
             departmentCombo.setEnabled(true);
-            String[] allDepts = config.getAllDepartments();
+            String[] allDepts = RegionMapper.getAllDepartments();
             for (String dept : allDepts) {
                 departmentCombo.addItem(dept);
             }
         } else {
-            // Désactiver la sélection, on utilisera tous les départements de la zone
+            // Désactiver la sélection, on utilisera tous les départements de la région
             departmentCombo.setEnabled(false);
-            departmentCombo.addItem("(Tous de la zone sélectionnée)");
+            departmentCombo.addItem("(Tous de la région sélectionnée)");
         }
     }
     
@@ -443,18 +446,28 @@ public class CompanyJobSearcher extends JFrame {
     }
     
     private String[] getDepartmentsForSearch() {
-        String selectedZone = (String) zoneCombo.getSelectedItem();
+        String selectedRegion = (String) regionCombo.getSelectedItem();
         
-        if (selectedZone.equals("Département spécifique")) {
+        System.out.println("🗺️ Région sélectionnée: " + selectedRegion);
+        
+        if (selectedRegion.equals("Département spécifique")) {
             // Un seul département sélectionné
             String dept = (String) departmentCombo.getSelectedItem();
+            System.out.println("   → Département unique: " + dept);
             return new String[]{dept};
-        } else if (selectedZone.equals("Île-de-France uniquement")) {
-            return config.getIdfDepartments();
-        } else if (selectedZone.equals("France métropolitaine")) {
-            return config.getFranceDepartments();
-        } else { // "Toute la France (DOM-TOM inclus)"
-            return config.getAllDepartments();
+        } else if (selectedRegion.equals("France métropolitaine (toutes régions)")) {
+            String[] depts = RegionMapper.getAllMetropolitanDepartments();
+            System.out.println("   → France métropolitaine: " + depts.length + " départements");
+            return depts;
+        } else if (selectedRegion.equals("France entière (DOM-TOM inclus)")) {
+            String[] depts = RegionMapper.getAllDepartments();
+            System.out.println("   → France entière: " + depts.length + " départements");
+            return depts;
+        } else {
+            // Une région spécifique sélectionnée
+            String[] depts = RegionMapper.getDepartmentsByRegion(selectedRegion);
+            System.out.println("   → " + selectedRegion + ": " + depts.length + " départements " + java.util.Arrays.toString(depts));
+            return depts;
         }
     }
     
@@ -655,6 +668,8 @@ public class CompanyJobSearcher extends JFrame {
                         if (parts.length >= 2) {
                             String deptStr = parts[1].replaceAll("[^0-9AB]", "");
                             offer.setDepartement(deptStr);
+                            // Déterminer la région à partir du département
+                            offer.setRegion(RegionMapper.getRegionByDepartment(deptStr));
                         }
                     }
                 }
