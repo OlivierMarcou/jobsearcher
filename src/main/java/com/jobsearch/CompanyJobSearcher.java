@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import com.google.gson.*;
 
@@ -54,6 +56,9 @@ public class CompanyJobSearcher extends JFrame {
     // Stockage des offres complètes pour export
     private final List<JobOffer> jobOffers = new ArrayList<>();
     
+    // Stockage des entreprises uniques (dédupliquées)
+    private final java.util.Map<String, Company> companies = new java.util.HashMap<>();
+    
     public CompanyJobSearcher() {
         super("Recherche d'Entreprises IT - Île-de-France");
         
@@ -79,6 +84,25 @@ public class CompanyJobSearcher extends JFrame {
     
     private void initializeUI() {
         setLayout(new BorderLayout(10, 10));
+        
+        // Barre de menu
+        JMenuBar menuBar = new JMenuBar();
+        
+        JMenu toolsMenu = new JMenu("Outils");
+        
+        JMenuItem pappersSearchItem = new JMenuItem("🔍 Recherche Avancée (Pappers.fr)");
+        pappersSearchItem.setFont(new Font("Arial", Font.PLAIN, 13));
+        pappersSearchItem.addActionListener(e -> openPappersSearchWindow());
+        toolsMenu.add(pappersSearchItem);
+        
+        toolsMenu.addSeparator();
+        
+        JMenuItem aboutItem = new JMenuItem("À propos");
+        aboutItem.addActionListener(e -> showAboutDialog());
+        toolsMenu.add(aboutItem);
+        
+        menuBar.add(toolsMenu);
+        setJMenuBar(menuBar);
         
         // Panel principal avec marges
         JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
@@ -262,26 +286,39 @@ public class CompanyJobSearcher extends JFrame {
         
         // Panel d'actions sur les résultats
         JPanel actionsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        JButton exportCsvButton = new JButton("📊 Exporter CSV");
+        
+        JButton exportCsvButton = new JButton("📊 Exporter Offres CSV");
         exportCsvButton.addActionListener(e -> exportToCSV());
         
-        JButton exportJsonButton = new JButton("📄 Exporter JSON");
+        JButton exportJsonButton = new JButton("📄 Exporter Offres JSON");
         exportJsonButton.addActionListener(e -> exportToJSON());
+        
+        JButton exportCompaniesButton = new JButton("🏢 Exporter Entreprises");
+        exportCompaniesButton.setFont(new Font("Arial", Font.BOLD, 12));
+        exportCompaniesButton.addActionListener(e -> exportCompanies());
         
         JButton clearButton = new JButton("🗑 Effacer");
         clearButton.addActionListener(e -> {
             tableModel.setRowCount(0);
             jobOffers.clear();
+            companies.clear();
         });
         
         actionsPanel.add(exportCsvButton);
         actionsPanel.add(exportJsonButton);
+        actionsPanel.add(exportCompaniesButton);
         actionsPanel.add(clearButton);
         actionsPanel.add(new JLabel("Total: "));
         
         JLabel countLabel = new JLabel("0");
         countLabel.setFont(new Font("Arial", Font.BOLD, 14));
         actionsPanel.add(countLabel);
+        
+        // Ajouter un compteur d'entreprises
+        actionsPanel.add(new JLabel(" | Entreprises: "));
+        JLabel companyCountLabel = new JLabel("0");
+        companyCountLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        actionsPanel.add(companyCountLabel);
         
         // Mettre à jour le compteur quand la table change
         tableModel.addTableModelListener(e -> 
@@ -767,6 +804,9 @@ public class CompanyJobSearcher extends JFrame {
             
             System.out.println("  → " + entreprise + " | " + poste + " | 📧 " + email);
             
+            // Extraire et stocker l'entreprise (dédupliquée)
+            extractAndStoreCompany(offer);
+            
             // Ajouter au tableau
             SwingUtilities.invokeLater(() -> 
                 tableModel.addRow(new Object[]{
@@ -776,6 +816,45 @@ public class CompanyJobSearcher extends JFrame {
         } catch (Exception e) {
             System.err.println("❌ Erreur parsing offre: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Extraire l'entreprise d'une offre et la stocker (dédupliquée)
+     */
+    private void extractAndStoreCompany(JobOffer offer) {
+        if (offer.getEntrepriseNom() == null || offer.getEntrepriseNom().equals("N/A")) {
+            return; // Pas d'entreprise identifiable
+        }
+        
+        Company company = new Company();
+        company.setNom(offer.getEntrepriseNom());
+        company.setSiteWeb(offer.getEntrepriseUrl());
+        company.setEmail(offer.getContactEmail());
+        company.setEmailRH(offer.getContactEmail()); // Depuis offre d'emploi = souvent RH
+        company.setTelephone(offer.getContactTelephone());
+        company.setVille(offer.getVille());
+        company.setCodePostal(offer.getCodePostal());
+        company.setDepartement(offer.getDepartement());
+        company.setRegion(offer.getRegion());
+        company.setSource("Offre d'emploi France Travail");
+        
+        // Clé unique pour déduplication
+        String key = company.getUniqueKey();
+        
+        // Stocker ou fusionner avec entreprise existante
+        if (companies.containsKey(key)) {
+            // Fusionner les infos (garder les non-null)
+            Company existing = companies.get(key);
+            if (company.getSiteWeb() != null && existing.getSiteWeb() == null) {
+                existing.setSiteWeb(company.getSiteWeb());
+            }
+            if (company.getEmail() != null && existing.getEmail() == null) {
+                existing.setEmail(company.getEmail());
+                existing.setEmailRH(company.getEmail());
+            }
+        } else {
+            companies.put(key, company);
         }
     }
     
@@ -852,53 +931,130 @@ public class CompanyJobSearcher extends JFrame {
     
     private void addCompanyToTable(JsonObject etablissement, String nafCode) {
         try {
-            String company = "N/A";
-            String siret = "N/A";
-            String city = "N/A";
-            String dept = "N/A";
-            String sector = getNAFDescription(nafCode);
+            Company company = new Company();
+            company.setSource("API SIRENE");
+            company.setCodeNAF(nafCode);
+            company.setLibelleNAF(getNAFDescription(nafCode));
+            company.setSecteurActivite(getNAFDescription(nafCode));
             
+            // SIRET
+            if (etablissement.has("siret")) {
+                String siret = etablissement.get("siret").getAsString();
+                company.setSiret(siret);
+                // SIREN = 9 premiers caractères du SIRET
+                if (siret.length() >= 9) {
+                    company.setSiren(siret.substring(0, 9));
+                }
+            }
+            
+            // Informations unité légale
             if (etablissement.has("uniteLegale")) {
                 JsonObject ul = etablissement.getAsJsonObject("uniteLegale");
+                
+                // Nom
                 if (ul.has("denominationUniteLegale")) {
-                    company = ul.get("denominationUniteLegale").getAsString();
+                    company.setNom(ul.get("denominationUniteLegale").getAsString());
+                } else if (ul.has("nomUniteLegale")) {
+                    company.setNom(ul.get("nomUniteLegale").getAsString());
+                }
+                
+                // Nom commercial
+                if (ul.has("denominationUsuelle1UniteLegale")) {
+                    company.setNomCommercial(ul.get("denominationUsuelle1UniteLegale").getAsString());
+                }
+                
+                // TAILLE / EFFECTIF (CODE TRANCHE)
+                if (ul.has("trancheEffectifsUniteLegale")) {
+                    String tranche = ul.get("trancheEffectifsUniteLegale").getAsString();
+                    company.setTrancheEffectifWithRange(tranche);
+                }
+                
+                // CATÉGORIE D'ENTREPRISE
+                if (ul.has("categorieEntreprise")) {
+                    String categorie = ul.get("categorieEntreprise").getAsString();
+                    company.setCategorieEntreprise(getCategorieLibelle(categorie));
+                }
+                
+                // Date de création
+                if (ul.has("dateCreationUniteLegale")) {
+                    company.setDateCreation(ul.get("dateCreationUniteLegale").getAsString());
                 }
             }
             
-            if (etablissement.has("siret")) {
-                siret = etablissement.get("siret").getAsString();
-            }
-            
+            // Adresse établissement
             if (etablissement.has("adresseEtablissement")) {
                 JsonObject adresse = etablissement.getAsJsonObject("adresseEtablissement");
-                if (adresse.has("libelleCommuneEtablissement")) {
-                    city = adresse.get("libelleCommuneEtablissement").getAsString();
+                
+                String adresseComplete = "";
+                if (adresse.has("numeroVoieEtablissement")) {
+                    adresseComplete += adresse.get("numeroVoieEtablissement").getAsString() + " ";
                 }
+                if (adresse.has("typeVoieEtablissement")) {
+                    adresseComplete += adresse.get("typeVoieEtablissement").getAsString() + " ";
+                }
+                if (adresse.has("libelleVoieEtablissement")) {
+                    adresseComplete += adresse.get("libelleVoieEtablissement").getAsString();
+                }
+                company.setAdresse(adresseComplete.trim());
+                
+                if (adresse.has("codePostalEtablissement")) {
+                    company.setCodePostal(adresse.get("codePostalEtablissement").getAsString());
+                }
+                
+                if (adresse.has("libelleCommuneEtablissement")) {
+                    String ville = adresse.get("libelleCommuneEtablissement").getAsString();
+                    company.setVille(ville);
+                }
+                
                 if (adresse.has("codeCommuneEtablissement")) {
                     String codeCommune = adresse.get("codeCommuneEtablissement").getAsString();
                     if (codeCommune.length() >= 2) {
-                        dept = codeCommune.substring(0, 2);
+                        String dept = codeCommune.substring(0, 2);
+                        company.setDepartement(dept);
+                        company.setRegion(RegionMapper.getRegionByDepartment(dept));
                     }
                 }
             }
             
-            String details = String.format("NAF: %s | Secteur: %s", nafCode, sector);
+            // Stocker l'entreprise (dédupliquée)
+            String key = company.getUniqueKey();
+            if (!companies.containsKey(key)) {
+                companies.put(key, company);
+            }
             
-            String finalCompany = company;
-            String finalSiret = siret;
-            String finalCity = city;
-            String finalDept = dept;
-            String finalDetails = details;
+            // Afficher dans le tableau (format simplifié)
+            final String nom = company.getNom() != null ? company.getNom() : "N/A";
+            final String siret = company.getSiret() != null ? company.getSiret() : "N/A";
+            final String ville = company.getVille() != null ? company.getVille() : "N/A";
+            final String dept = company.getDepartement() != null ? company.getDepartement() : "N/A";
+            final String taille = company.getTailleLibelle();
+            final String categorie = company.getCategorieEntreprise() != null ? company.getCategorieEntreprise() : "N/A";
+            final String secteur = company.getLibelleNAF();
+            
+            System.out.println("  → " + nom + " | " + ville + " | " + taille);
             
             SwingUtilities.invokeLater(() -> 
                 tableModel.addRow(new Object[]{
-                    finalCompany, finalSiret, sector, finalDept, 
-                    finalCity, "Entreprise IT", finalDetails
+                    nom, siret, secteur, dept, ville, taille, categorie, "N/A" // N/A pour les liens dans ce cas
                 }));
                 
         } catch (Exception e) {
-            System.err.println("Erreur parsing établissement: " + e.getMessage());
+            System.err.println("❌ Erreur parsing établissement: " + e.getMessage());
+            e.printStackTrace();
         }
+    }
+    
+    /**
+     * Libellé de la catégorie d'entreprise
+     */
+    private String getCategorieLibelle(String code) {
+        return switch (code) {
+            case "PME" -> "PME (Petite et Moyenne Entreprise)";
+            case "ETI" -> "ETI (Entreprise de Taille Intermédiaire)";
+            case "GE" -> "Grande Entreprise";
+            case "MIC" -> "Micro-entreprise";
+            default -> code;
+        };
     }
     
     private String getNAFDescription(String nafCode) {
@@ -1049,6 +1205,157 @@ public class CompanyJobSearcher extends JFrame {
                     "Erreur", JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+    
+    /**
+     * Exporter uniquement les entreprises (dédupliquées) avec taille, CA, site web et contact RH
+     */
+    private void exportCompanies() {
+        if (companies.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                "Aucune entreprise à exporter. Lancez d'abord une recherche.",
+                "Information", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
+        // Demander le format d'export
+        String[] options = {"CSV", "JSON", "Les deux"};
+        int choice = JOptionPane.showOptionDialog(this,
+            companies.size() + " entreprises uniques trouvées.\nChoisissez le format d'export:",
+            "Export Entreprises",
+            JOptionPane.DEFAULT_OPTION,
+            JOptionPane.QUESTION_MESSAGE,
+            null,
+            options,
+            options[0]);
+        
+        if (choice == JOptionPane.CLOSED_OPTION) return;
+        
+        boolean exportCsv = (choice == 0 || choice == 2);
+        boolean exportJson = (choice == 1 || choice == 2);
+        
+        try {
+            if (exportCsv) {
+                exportCompaniesToCSV();
+            }
+            if (exportJson) {
+                exportCompaniesToJSON();
+            }
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this,
+                "Erreur lors de l'export:\n" + e.getMessage(),
+                "Erreur", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    /**
+     * Exporter les entreprises en CSV
+     */
+    private void exportCompaniesToCSV() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Exporter entreprises en CSV");
+        fileChooser.setSelectedFile(new java.io.File("entreprises.csv"));
+        
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try (java.io.PrintWriter writer = new java.io.PrintWriter(
+                    fileChooser.getSelectedFile(), 
+                    java.nio.charset.Charset.forName("UTF-8"))) {
+                
+                String sep = ";";
+                
+                // En-têtes
+                writer.println(Company.getCsvHeaders(sep));
+                
+                // Données (triées par nom)
+                companies.values().stream()
+                    .sorted((c1, c2) -> {
+                        String n1 = c1.getNom() != null ? c1.getNom() : "";
+                        String n2 = c2.getNom() != null ? c2.getNom() : "";
+                        return n1.compareToIgnoreCase(n2);
+                    })
+                    .forEach(company -> writer.println(company.toCsvLine(sep)));
+                
+                JOptionPane.showMessageDialog(this,
+                    "Export CSV réussi: " + companies.size() + " entreprises exportées\n" +
+                    "Fichier: " + fileChooser.getSelectedFile().getName(),
+                    "Succès", JOptionPane.INFORMATION_MESSAGE);
+                    
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this,
+                    "Erreur lors de l'export CSV:\n" + e.getMessage(),
+                    "Erreur", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    
+    /**
+     * Exporter les entreprises en JSON
+     */
+    private void exportCompaniesToJSON() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Exporter entreprises en JSON");
+        fileChooser.setSelectedFile(new java.io.File("entreprises.json"));
+        
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try (java.io.FileWriter writer = new java.io.FileWriter(fileChooser.getSelectedFile())) {
+                
+                // Trier par nom
+                List<Company> sortedCompanies = new ArrayList<>(companies.values());
+                sortedCompanies.sort((c1, c2) -> {
+                    String n1 = c1.getNom() != null ? c1.getNom() : "";
+                    String n2 = c2.getNom() != null ? c2.getNom() : "";
+                    return n1.compareToIgnoreCase(n2);
+                });
+                
+                Gson gsonPretty = new GsonBuilder().setPrettyPrinting().create();
+                String json = gsonPretty.toJson(sortedCompanies);
+                writer.write(json);
+                
+                JOptionPane.showMessageDialog(this,
+                    "Export JSON réussi: " + companies.size() + " entreprises exportées\n" +
+                    "Fichier: " + fileChooser.getSelectedFile().getName(),
+                    "Succès", JOptionPane.INFORMATION_MESSAGE);
+                    
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this,
+                    "Erreur lors de l'export JSON:\n" + e.getMessage(),
+                    "Erreur", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    
+    /**
+     * Ouvrir la fenêtre de recherche avancée Pappers
+     */
+    private void openPappersSearchWindow() {
+        PappersSearchWindow pappersWindow = new PappersSearchWindow(config);
+        pappersWindow.setVisible(true);
+    }
+    
+    /**
+     * Afficher la boîte de dialogue À propos
+     */
+    private void showAboutDialog() {
+        String message = 
+            "Recherche d'Entreprises IT - Version 2.3\n\n" +
+            "Fonctionnalités:\n" +
+            "• Recherche offres d'emploi IT (API France Travail)\n" +
+            "• Recherche entreprises informatiques (API SIRENE)\n" +
+            "• Recherche avancée (API Pappers.fr)\n" +
+            "• Export CSV et JSON\n" +
+            "• 18 régions françaises\n" +
+            "• 101 départements\n\n" +
+            "APIs utilisées:\n" +
+            "• France Travail - Offres d'emploi\n" +
+            "• INSEE SIRENE - Données entreprises\n" +
+            "• Pappers.fr - Données enrichies\n\n" +
+            "Développé avec Java 21 et Swing\n" +
+            "Janvier 2026";
+        
+        JOptionPane.showMessageDialog(this,
+            message,
+            "À propos",
+            JOptionPane.INFORMATION_MESSAGE);
     }
     
     private void updateStatus(String message) {

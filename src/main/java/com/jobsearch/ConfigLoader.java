@@ -261,6 +261,21 @@ public class ConfigLoader {
     }
     
     /**
+     * Obtenir la clé API Pappers
+     */
+    public String getPappersApiKey() {
+        return getProperty("pappers.api.key");
+    }
+    
+    /**
+     * Vérifier si la clé API Pappers est configurée
+     */
+    public boolean hasPappersApiKey() {
+        String key = getPappersApiKey();
+        return key != null && !key.trim().isEmpty();
+    }
+    
+    /**
      * Afficher toutes les propriétés (pour debug)
      */
     public void printAllProperties() {
