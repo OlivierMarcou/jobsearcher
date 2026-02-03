@@ -42,3 +42,5 @@ ui.default.keywords=développeur java
 export.default.filename=resultats_entreprises.csv
 export.csv.encoding=UTF-8
 export.csv.separator=;
+
+pappers.api.key=
